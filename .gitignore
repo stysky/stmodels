@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+artifacts/
+checkpoints/
+runs/
+data/raw/
+
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+env/

@@ -1,0 +1,19 @@
+{
+  "model": "stgcn",
+  "dataset": "metr-la",
+  "dataset_kwargs": {
+    "adjacency_strategy": "auto",
+    "zero_as_missing": true,
+    "fill_method": "interpolate"
+  },
+  "model_config": {
+    "history_steps": 12,
+    "prediction_step": 3,
+    "epochs": 10,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "weight_decay": 0.001,
+    "graph_conv_type": "cheb_graph_conv",
+    "gso_type": "sym_norm_lap"
+  }
+}
