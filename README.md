@@ -187,6 +187,25 @@ python scripts/run_experiment.py --model dcrnn --dataset my-dataset
 
 前提是 `data/raw/MyDataset/dataset.json` 里的 `name` 填的是 `my-dataset`。
 
+快速做 METR-LA 架构选型（默认比较 `graph-wavenet / agcrn / mtgnn / stid / dgcrn`，汇总后会自动清理临时训练产物）：
+```bash
+python scripts/select_metr_la_architectures.py
+```
+
+如果只想粗看趋势，可以进一步压缩训练预算：
+```bash
+python scripts/select_metr_la_architectures.py --epochs 6 --patience 2
+```
+
+仓库默认随代码保留一份较小的 `METR-LA` 数据，可在新的机器上直接训练：
+```bash
+python scripts/run_experiment.py --config configs/dcrnn-metr-la.json
+```
+
+如果想直接在云服务器后台跑并把日志落盘：
+```bash
+nohup python scripts/run_experiment.py --config configs/dcrnn-metr-la.json > train_dcrnn_metr_la.log 2>&1 &
+```
 ### 4. 查看结果
 
 训练完成后，结果会保存在：

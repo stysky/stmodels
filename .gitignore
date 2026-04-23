@@ -7,8 +7,13 @@ artifacts/
 checkpoints/
 runs/
 runs_*/
+.tmp_architecture_selection_runs/
+reports/
 data/raw/*
 !data/raw/dataset.template.json
+!data/raw/METR-LA/
+!data/raw/METR-LA/metr-la.h5
+!data/raw/METR-LA/adj_METR-LA.pkl
 
 .pytest_cache/
 .mypy_cache/
