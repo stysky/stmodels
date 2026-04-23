@@ -1,4 +1,4 @@
-# Pinjian SpatialTemporal
+# SpatialTemporal
 
 > A unified spatiotemporal forecasting framework for traffic prediction, model reproduction, and fair cross-model comparison.
 
@@ -8,7 +8,7 @@
 [![Datasets](https://img.shields.io/badge/Datasets-2-success.svg)](#supported-datasets)
 [![Stars](https://img.shields.io/github/stars/stysky/STmodels?style=social)](https://github.com/stysky/STmodels)
 
-Pinjian SpatialTemporal 是一个面向交通时空预测的统一实验框架。  
+SpatialTemporal 是一个面向交通时空预测的统一实验框架。  
 它的核心目标不是只实现某一个模型，而是把不同数据集、不同模型和不同训练脚本收敛到同一套标准下，让复现、对比和扩展都更简单。
 
 ## Overview
@@ -125,7 +125,7 @@ from pathlib import Path
 
 from spatiotemporal import ExperimentRunner
 
-runner = ExperimentRunner(Path(r"e:\Project Py\Pinjian_spatialTemporal"))
+runner = ExperimentRunner(Path(r"/path/to/SpatialTemporal"))
 
 result = runner.train(
     model_name="graph-wavenet",
@@ -162,7 +162,7 @@ prediction = runner.predict(
 ## Project Structure
 
 ```text
-Pinjian_spatialTemporal/
+SpatialTemporal/
 ├── configs/                    # Experiment configs
 ├── data/                       # Data assets
 ├── scripts/
