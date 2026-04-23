@@ -1,0 +1,23 @@
+{
+  "name": "my-dataset",
+  "data_format": "npz",
+  "data_path": "data.npz",
+  "data_key": "data",
+  "default_start_date": "2024-01-01",
+  "default_freq": "5min",
+  "sensor_ids_path": "sensor_ids.txt",
+  "graph_path": "../../graphs/my-dataset_adj.npz",
+  "graph_source_csv_path": "edges.csv",
+  "graph_source_col": "from",
+  "graph_target_col": "to",
+  "graph_weight_col": "distance",
+  "graph_weight_mode": "gaussian",
+  "graph_threshold": 0.1,
+  "graph_include_reverse": false,
+  "graph_self_loop_weight": null,
+  "feature_names": ["flow", "occupancy", "speed"],
+  "target_feature_name": "flow",
+  "clean_feature_indices": [0],
+  "zero_as_missing": true,
+  "fill_method": "interpolate"
+}

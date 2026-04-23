@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import pickle
 from pathlib import Path
 from typing import Sequence
@@ -67,6 +68,36 @@ def clean_speed_dataframe(
     return cleaned
 
 
+def clean_feature_array(
+    values: np.ndarray,
+    treat_zero_as_missing: bool = True,
+    fill_method: str = "interpolate",
+    feature_indices: Sequence[int] | None = None,
+) -> np.ndarray:
+    values = ensure_feature_axis(values)
+    if not treat_zero_as_missing:
+        return values.astype(np.float32)
+
+    cleaned = values.astype(np.float32, copy=True)
+    selected = tuple(range(cleaned.shape[-1])) if feature_indices is None else tuple(int(index) for index in feature_indices)
+    if not selected:
+        return cleaned
+
+    flattened = cleaned[..., list(selected)].reshape(cleaned.shape[0], -1)
+    frame = pd.DataFrame(flattened)
+    cleaned_frame = clean_speed_dataframe(
+        frame,
+        treat_zero_as_missing=treat_zero_as_missing,
+        fill_method=fill_method,
+    )
+    cleaned[..., list(selected)] = cleaned_frame.to_numpy(dtype=np.float32).reshape(
+        cleaned.shape[0],
+        cleaned.shape[1],
+        len(selected),
+    )
+    return cleaned
+
+
 def read_traffic_h5(
     h5_path: str | Path,
     start_date: str,
@@ -87,6 +118,41 @@ def read_traffic_h5(
     df = pd.DataFrame(values, columns=sensor_ids)
     df.index = pd.date_range(start=start_date, periods=len(df), freq=freq)
     return df, sensor_ids
+
+
+def read_traffic_npz(
+    npz_path: str | Path,
+    data_key: str = "data",
+) -> np.ndarray:
+    npz_path = Path(npz_path)
+    with np.load(npz_path) as handle:
+        if data_key not in handle:
+            available = ", ".join(handle.files)
+            raise KeyError(f"{npz_path} does not contain key '{data_key}'. Available keys: {available}")
+        values = handle[data_key]
+    return ensure_feature_axis(values)
+
+
+def build_datetime_index(
+    length: int,
+    start_date: str,
+    freq: str = "5min",
+) -> pd.DatetimeIndex:
+    return pd.date_range(start=start_date, periods=length, freq=freq)
+
+
+def read_sensor_ids(sensor_ids_path: str | Path) -> list[str]:
+    sensor_ids_path = Path(sensor_ids_path)
+    suffix = sensor_ids_path.suffix.lower()
+    if suffix == ".txt":
+        return [line.strip() for line in sensor_ids_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if suffix == ".csv":
+        frame = pd.read_csv(sensor_ids_path)
+        if frame.empty:
+            return []
+        first_column = frame.columns[0]
+        return [str(value) for value in frame[first_column].tolist()]
+    raise ValueError(f"Unsupported sensor id file: {sensor_ids_path}")
 
 
 def split_indices(num_items: int, split_config: SplitConfig) -> tuple[slice, slice, slice]:
@@ -207,6 +273,74 @@ def load_pickle_adj(pickle_file: str | Path) -> tuple[list[str], dict[str, int],
 
 def load_adjacency_npz(npz_file: str | Path) -> sp.csc_matrix:
     return sp.load_npz(npz_file).tocsc()
+
+
+def build_edge_adjacency(
+    csv_path: str | Path,
+    sensor_ids: Sequence[str],
+    source_col: str = "from",
+    target_col: str = "to",
+    weight_col: str | None = None,
+    weight_mode: str = "gaussian",
+    threshold: float = 0.1,
+    default_weight: float = 1.0,
+    include_reverse: bool = False,
+    self_loop_weight: float | None = None,
+) -> np.ndarray:
+    csv_path = Path(csv_path)
+    id_to_index = {str(sensor_id): index for index, sensor_id in enumerate(sensor_ids)}
+    adjacency = np.zeros((len(sensor_ids), len(sensor_ids)), dtype=np.float32)
+
+    records: list[tuple[int, int, float]] = []
+    raw_weights: list[float] = []
+    with csv_path.open("r", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        fieldnames = set(reader.fieldnames or [])
+        if source_col not in fieldnames or target_col not in fieldnames:
+            raise KeyError(f"{csv_path} must contain columns '{source_col}' and '{target_col}'")
+        if weight_col is not None and weight_col not in fieldnames:
+            raise KeyError(f"{csv_path} must contain weight column '{weight_col}'")
+
+        for row in reader:
+            source_id = str(row[source_col]).strip()
+            target_id = str(row[target_col]).strip()
+            if source_id not in id_to_index or target_id not in id_to_index:
+                continue
+            raw_weight = float(row[weight_col]) if weight_col is not None and row.get(weight_col) else float(default_weight)
+            records.append((id_to_index[source_id], id_to_index[target_id], raw_weight))
+            raw_weights.append(raw_weight)
+
+    if not records:
+        raise ValueError(f"No valid edges found in {csv_path}")
+
+    if weight_col is None or weight_mode == "binary":
+        scaled_weights = [1.0] * len(records)
+    elif weight_mode == "distance":
+        scaled_weights = [weight for _, _, weight in records]
+    elif weight_mode == "inverse_distance":
+        scaled_weights = [1.0 / max(weight, 1e-6) for _, _, weight in records]
+    elif weight_mode == "gaussian":
+        weights_array = np.asarray(raw_weights, dtype=np.float32)
+        positive = weights_array[weights_array > 0]
+        scale = float(positive.std()) if len(positive) else 1.0
+        if scale <= 0:
+            scale = float(positive.mean()) if len(positive) else 1.0
+        if scale <= 0:
+            scale = 1.0
+        scaled_weights = [float(np.exp(-((weight / scale) ** 2))) for _, _, weight in records]
+    else:
+        raise ValueError(f"Unsupported weight_mode: {weight_mode}")
+
+    for (source_index, target_index, _), scaled_weight in zip(records, scaled_weights, strict=True):
+        if threshold > 0 and scaled_weight < threshold:
+            continue
+        adjacency[source_index, target_index] = max(adjacency[source_index, target_index], scaled_weight)
+        if include_reverse:
+            adjacency[target_index, source_index] = max(adjacency[target_index, source_index], scaled_weight)
+
+    if self_loop_weight is not None:
+        np.fill_diagonal(adjacency, self_loop_weight)
+    return adjacency.astype(np.float32)
 
 
 def save_adj_pkl(output_path: str | Path, sensor_ids: list[str], adj_mx: np.ndarray) -> Path:

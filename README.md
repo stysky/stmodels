@@ -5,7 +5,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](./requirements.txt)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.7.1%2Bcu118-ee4c2c.svg)](https://pytorch.org/)
 [![Models](https://img.shields.io/badge/Models-9-success.svg)](#当前支持)
-[![Datasets](https://img.shields.io/badge/Datasets-2-success.svg)](#当前支持)
+[![Datasets](https://img.shields.io/badge/Datasets-6-success.svg)](#当前支持)
 [![Stars](https://img.shields.io/github/stars/stysky/STmodels?style=social)](https://github.com/stysky/STmodels)
 
 这个项目的重点不是单独实现某一个模型，而是把数据读取、图结构处理、训练流程、实验配置和结果保存统一起来，让不同模型尽量在同一套实验口径下运行。
@@ -20,35 +20,32 @@ SpatialTemporal/
 |-- configs/                                   # 实验配置目录
 |   |-- _base/
 |   |   `-- common.json                        # 公共基础配置
-|   |-- graph-wavenet-metr-la.json             # Graph WaveNet + METR-LA
-|   |-- graph-wavenet-pems-bay.json            # Graph WaveNet + PEMS-BAY
-|   |-- stgcn-metr-la.json                     # STGCN + METR-LA
-|   |-- stgcn-pems-bay.json                    # STGCN + PEMS-BAY
-|   |-- dcrnn-metr-la.json                     # DCRNN + METR-LA
-|   |-- dcrnn-pems-bay.json                    # DCRNN + PEMS-BAY
-|   |-- agcrn-metr-la.json                     # AGCRN + METR-LA
-|   |-- agcrn-pems-bay.json                    # AGCRN + PEMS-BAY
-|   |-- astgcn-metr-la.json                    # ASTGCN + METR-LA
-|   |-- astgcn-pems-bay.json                   # ASTGCN + PEMS-BAY
-|   |-- gman-metr-la.json                      # GMAN + METR-LA
-|   |-- gman-pems-bay.json                     # GMAN + PEMS-BAY
-|   |-- mtgnn-metr-la.json                     # MTGNN + METR-LA
-|   |-- mtgnn-pems-bay.json                    # MTGNN + PEMS-BAY
-|   |-- stid-metr-la.json                      # STID + METR-LA
-|   |-- stid-pems-bay.json                     # STID + PEMS-BAY
-|   |-- dgcrn-metr-la.json                     # DGCRN + METR-LA
-|   `-- dgcrn-pems-bay.json                    # DGCRN + PEMS-BAY
+|   |-- {model}-{dataset}.json                 # 单个实验配置文件
+|   `-- ...                                    # 其余模型/数据集组合配置
 |
 |-- data/                                      # 数据目录
 |   |-- README.md                              # 数据目录约定说明
-|   |-- raw/                                   # 原始时序数据和官方图文件
-|   |   |-- metr-la.h5
-|   |   |-- pems-bay.h5
-|   |   |-- adj_METR-LA.pkl
-|   |   `-- adj_mx_bay.pkl
+|   |-- raw/                                   # 固定的数据集目录约定
+|   |   |-- dataset.template.json              # 自定义数据集模板
+|   |   |-- METR-LA/
+|   |   |   |-- metr-la.h5
+|   |   |   `-- adj_METR-LA.pkl
+|   |   |-- PEMS-BAY/
+|   |   |   |-- pems-bay.h5
+|   |   |   `-- adj_mx_bay.pkl
+|   |   |-- PEMS03/
+|   |   |   |-- PEMS03.npz
+|   |   |   |-- PEMS03.csv
+|   |   |   `-- PEMS03.txt
+|   |   `-- MyDataset/
+|   |       |-- dataset.json
+|   |       |-- data.npz
+|   |       |-- sensor_ids.txt
+|   |       `-- edges.csv
 |   `-- graphs/                                # 项目内部统一使用的图结构文件
 |       |-- metr-la_adj.npz
-|       `-- pems-bay_adj.npz
+|       |-- pems-bay_adj.npz
+|       `-- {dataset}_adj.npz
 |
 |-- scripts/
 |   `-- run_experiment.py                      # 统一命令行入口
@@ -98,6 +95,12 @@ configs/*.json 或 CLI 参数
 
 - `metr-la`
 - `pems-bay`
+- `pems03`
+- `pems04`
+- `pems07`
+- `pems08`
+
+也支持自动发现 `data/raw/<你的数据集>/dataset.json` 描述的自定义数据集。
 
 ### 模型
 
@@ -123,17 +126,40 @@ pip install -r requirements.txt
 
 ### 2. 准备数据
 
-项目默认从 `data/raw/` 读取原始文件：
+项目现在固定使用 `data/raw/<DATASET>/` 目录结构：
 
 ```text
 data/raw/
-|-- metr-la.h5
-|-- pems-bay.h5
-|-- adj_METR-LA.pkl
-`-- adj_mx_bay.pkl
+|-- dataset.template.json
+|-- METR-LA/
+|   |-- metr-la.h5
+|   `-- adj_METR-LA.pkl
+|-- PEMS-BAY/
+|   |-- pems-bay.h5
+|   `-- adj_mx_bay.pkl
+|-- PEMS03/
+|   |-- PEMS03.npz
+|   |-- PEMS03.csv
+|   `-- PEMS03.txt
+|-- PEMS04/
+|   |-- PEMS04.npz
+|   `-- PEMS04.csv
+|-- PEMS07/
+|   |-- PEMS07.npz
+|   `-- PEMS07.csv
+`-- PEMS08/
+    |-- PEMS08.npz
+    `-- PEMS08.csv
 ```
 
+框架支持的常见原始格式包括：
+
+- 时序数据：`h5`、`npz`
+- 传感器列表：`txt`、`csv`
+- 图结构：`pkl`、稀疏 `npz`、边表 `csv`
+
 如果官方图文件存在，框架会优先整理并使用 `data/graphs/*.npz` 中的标准化图结构文件。
+更细的字段约定见 [data/README.md](/e:/Project%20Py/Pinjian_spatialTemporal/data/README.md:1)。
 
 ### 3. 启动实验
 
@@ -149,7 +175,17 @@ python scripts/run_experiment.py --config configs/stgcn-pems-bay.json
 ```bash
 python scripts/run_experiment.py --model dcrnn --dataset metr-la
 python scripts/run_experiment.py --model mtgnn --dataset pems-bay
+python scripts/run_experiment.py --model dcrnn --dataset pems03
+python scripts/run_experiment.py --model stgcn --dataset pems08
 ```
+
+如果你放入了自己的数据集目录，也可以直接运行：
+
+```bash
+python scripts/run_experiment.py --model dcrnn --dataset my-dataset
+```
+
+前提是 `data/raw/MyDataset/dataset.json` 里的 `name` 填的是 `my-dataset`。
 
 ### 4. 查看结果
 
@@ -176,5 +212,5 @@ runs/{model}/{dataset}/{timestamp-tag}/
 ## 补充说明
 
 - 当前仓库重点是统一实验流程，不包含可视化界面或部署模块。
-- `data/raw/` 默认被 `.gitignore` 忽略，上传仓库时通常不会包含原始数据文件。
+- `data/raw/` 下的真实原始数据默认被 `.gitignore` 忽略；仓库只保留模板文件 `data/raw/dataset.template.json`。
 - 如果你的目标是快速跑通实验，从 `configs/` 和 `scripts/run_experiment.py` 开始就够了。

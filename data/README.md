@@ -28,14 +28,14 @@
 
 ### `metr-la`
 
-- 原始时序：`data/raw/metr-la.h5`
-- 官方图来源：`data/raw/adj_METR-LA.pkl`
+- 原始时序：`data/raw/METR-LA/metr-la.h5`
+- 官方图来源：`data/raw/METR-LA/adj_METR-LA.pkl`
 - 项目标准图：`data/graphs/metr-la_adj.npz`
 
 ### `pems-bay`
 
-- 原始时序：`data/raw/pems-bay.h5`
-- 官方图来源：`data/raw/adj_mx_bay.pkl`
+- 原始时序：`data/raw/PEMS-BAY/pems-bay.h5`
+- 官方图来源：`data/raw/PEMS-BAY/adj_mx_bay.pkl`
 - 项目标准图：`data/graphs/pems-bay_adj.npz`
 
 ## 图结构解析策略
@@ -78,3 +78,57 @@
 - 项目内部稳定使用的图文件统一放 `data/graphs/`
 - 不要再把图文件或数据副本放到模型目录里
 - 新增数据集时，优先在 `spatiotemporal/datasets.py` 里登记输入文件路径和图结构来源
+
+## Custom Dataset Quick Start
+
+现在框架除了内置 `metr-la / pems-bay / pems03 / pems04 / pems07 / pems08`，也支持自动发现自定义数据集。
+
+推荐目录结构：
+
+```text
+data/
+|-- graphs/
+`-- raw/
+    |-- dataset.template.json
+    `-- MyDataset/
+        |-- dataset.json
+        |-- data.npz
+        |-- sensor_ids.txt          # 可选
+        `-- edges.csv               # 可选
+```
+
+使用方式：
+
+1. 把 [dataset.template.json](/e:/Project%20Py/Pinjian_spatialTemporal/data/raw/dataset.template.json) 复制成 `data/raw/MyDataset/dataset.json`
+2. 根据你的数据格式填写 `data_format / data_path / feature_names / target_feature_name`
+3. 如果有图结构：
+   填 `graph_source_pkl_path`、`graph_source_npz_path` 或 `graph_source_csv_path`
+4. 如果没有图结构：
+   在运行配置里把 `dataset_kwargs.adjacency_strategy` 设成 `correlation` 或 `none`
+
+当前支持的常见输入格式：
+
+- 时序数据：`h5`、`npz`
+- 传感器列表：`txt`、`csv`
+- 图结构：官方 `pkl`、稀疏 `npz`、边表 `csv`
+
+`npz` 约定：
+
+- 主数据默认读取键名 `data`
+- 数据形状应为 `[T, N]` 或 `[T, N, F]`
+- 如果是多特征输入，`feature_names` 数量必须和 `F` 一致
+- `target_feature_name` 指定训练要预测的目标通道
+
+边表 `csv` 约定：
+
+- 默认列名为 `from` / `to`
+- 权重列可以是 `distance` 或 `cost`
+- 没有权重列时也可以按无权图处理
+
+如果只想直接跑你自己的数据集，不改源码也可以：
+
+```bash
+python scripts/run_experiment.py --model dcrnn --dataset my-dataset
+```
+
+前提是 `data/raw/<你的目录>/dataset.json` 里的 `name` 填的是 `my-dataset`。
