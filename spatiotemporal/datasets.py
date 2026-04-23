@@ -24,6 +24,7 @@ class BaseTrafficDataset:
     graph_path: str | None = None
     graph_source_pkl_path: str | None = None
     graph_source_npz_path: str | None = None
+    target_feature_name: str = "speed"
 
     def __init__(
         self,
@@ -45,7 +46,7 @@ class BaseTrafficDataset:
     def raw_path(self) -> Path:
         return self.project_root / "data" / "raw" / self.raw_filename
 
-    def load(self) -> TrafficData:
+    def load_raw_frame(self):
         df, sensor_ids = read_traffic_h5(
             self.raw_path,
             start_date=self.default_start_date,
@@ -56,14 +57,20 @@ class BaseTrafficDataset:
             treat_zero_as_missing=self.zero_as_missing,
             fill_method=self.fill_method,
         )
+        return df, sensor_ids
+
+    def load(self) -> TrafficData:
+        df, sensor_ids = self.load_raw_frame()
         adjacency, source = self._resolve_adjacency(sensor_ids=sensor_ids, values=df.values)
         return TrafficData(
             name=self.dataset_name,
-            values=df.values,
+            values=df.values[..., None],
             sensor_ids=sensor_ids,
             timestamps=df.index,
             adjacency=adjacency,
             freq=self.default_freq,
+            feature_names=[self.target_feature_name],
+            target_feature=self.target_feature_name,
             metadata={"adjacency_source": source},
         )
 
@@ -136,8 +143,26 @@ DATASET_REGISTRY = {
 }
 
 
-def create_dataset(name: str, project_root: str | Path, **kwargs) -> BaseTrafficDataset:
-    dataset_cls = DATASET_REGISTRY.get(name.lower())
+def list_datasets() -> tuple[str, ...]:
+    return tuple(sorted(DATASET_REGISTRY))
+
+
+def normalize_dataset_name(name: str) -> str:
+    normalized = name.strip().lower()
+    if not normalized:
+        raise ValueError("Dataset name must not be empty")
+    return normalized
+
+
+def get_dataset_class(name: str) -> type[BaseTrafficDataset]:
+    normalized = normalize_dataset_name(name)
+    dataset_cls = DATASET_REGISTRY.get(normalized)
     if dataset_cls is None:
-        raise KeyError(f"Unsupported dataset: {name}")
+        supported = ", ".join(list_datasets())
+        raise KeyError(f"Unsupported dataset: {name}. Supported datasets: {supported}")
+    return dataset_cls
+
+
+def create_dataset(name: str, project_root: str | Path, **kwargs) -> BaseTrafficDataset:
+    dataset_cls = get_dataset_class(name)
     return dataset_cls(project_root=project_root, **kwargs)

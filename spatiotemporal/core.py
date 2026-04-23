@@ -29,16 +29,26 @@ class TrafficData:
     timestamps: pd.DatetimeIndex
     adjacency: sp.spmatrix | np.ndarray | None = None
     freq: str = "5min"
+    feature_names: list[str] = field(default_factory=lambda: ["speed"])
+    target_feature: str = "speed"
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.values = np.asarray(self.values, dtype=np.float32)
-        if self.values.ndim != 2:
-            raise ValueError(f"Traffic values must have shape [T, N], got {self.values.shape}")
+        values = np.asarray(self.values, dtype=np.float32)
+        if values.ndim == 2:
+            values = values[..., None]
+        if values.ndim != 3:
+            raise ValueError(f"Traffic values must have shape [T, N, F], got {values.shape}")
+
+        self.values = values
         if self.values.shape[1] != len(self.sensor_ids):
             raise ValueError("Sensor id count must match data width")
         if len(self.timestamps) != self.values.shape[0]:
             raise ValueError("Timestamp count must match data length")
+        if len(self.feature_names) != self.values.shape[2]:
+            raise ValueError("Feature name count must match feature dimension")
+        if self.target_feature not in self.feature_names:
+            raise ValueError(f"Unknown target_feature: {self.target_feature}")
 
     @property
     def num_timesteps(self) -> int:
@@ -48,8 +58,31 @@ class TrafficData:
     def num_nodes(self) -> int:
         return int(self.values.shape[1])
 
+    @property
+    def num_features(self) -> int:
+        return int(self.values.shape[2])
+
+    @property
+    def target_index(self) -> int:
+        return self.feature_names.index(self.target_feature)
+
+    @property
+    def target_values(self) -> np.ndarray:
+        return self.values[..., self.target_index]
+
+    def feature_dataframe(self, feature: int | str = 0) -> pd.DataFrame:
+        if isinstance(feature, str):
+            feature_index = self.feature_names.index(feature)
+        else:
+            feature_index = int(feature)
+        return pd.DataFrame(
+            self.values[..., feature_index],
+            index=self.timestamps,
+            columns=self.sensor_ids,
+        )
+
     def to_dataframe(self) -> pd.DataFrame:
-        return pd.DataFrame(self.values, index=self.timestamps, columns=self.sensor_ids)
+        return self.feature_dataframe(self.target_feature)
 
 
 @dataclass

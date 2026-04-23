@@ -6,6 +6,7 @@ __pycache__/
 artifacts/
 checkpoints/
 runs/
+runs_*/
 data/raw/
 
 .pytest_cache/

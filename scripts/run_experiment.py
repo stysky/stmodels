@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 from pathlib import Path
 
@@ -11,19 +10,17 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from dataclasses import asdict, replace
 
+from spatiotemporal.adapters import list_models, normalize_model_name
 from spatiotemporal.api import ExperimentRunner
+from spatiotemporal.config_loader import load_json_config
+from spatiotemporal.datasets import list_datasets, normalize_dataset_name
 from spatiotemporal.run_manager import RunManager
-
-
-def load_json_config(config_path: str) -> dict:
-    with open(config_path, "r", encoding="utf-8") as handle:
-        return json.load(handle)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Unified runner for spatial-temporal forecasting models")
-    parser.add_argument("--model", choices=["graph-wavenet", "stgcn"])
-    parser.add_argument("--dataset", choices=["metr-la", "pems-bay"])
+    parser.add_argument("--model", choices=list_models())
+    parser.add_argument("--dataset", choices=list_datasets())
     parser.add_argument("--epochs", type=int, default=None, help="Optional epoch override")
     parser.add_argument("--export_dir", type=str, default="", help="Optional directory for exporting native artifacts")
     parser.add_argument("--export_only", action="store_true", help="Only export model-native artifacts and skip training")
@@ -33,46 +30,41 @@ def main() -> None:
     args = parser.parse_args()
 
     config_data = load_json_config(args.config) if args.config else {}
-    model_name = args.model or config_data.get("model")
-    dataset_name = args.dataset or config_data.get("dataset")
-    if not model_name or not dataset_name:
+    raw_model_name = args.model or config_data.get("model", "")
+    raw_dataset_name = args.dataset or config_data.get("dataset", "")
+    if not raw_model_name or not raw_dataset_name:
         raise ValueError("Either pass --model/--dataset or provide them in --config")
+    model_name = normalize_model_name(raw_model_name)
+    dataset_name = normalize_dataset_name(raw_dataset_name)
 
     runner = ExperimentRunner(project_root=PROJECT_ROOT)
-    run_manager = RunManager(PROJECT_ROOT / args.run_root)
-    run_paths = run_manager.create_paths(model_name, dataset_name, tag=args.tag)
-    model_kwargs = {}
+    run_root = runner.resolve_run_root(args.run_root)
+    run_manager = RunManager(run_root)
+    run_paths = runner.create_run(model_name, dataset_name, tag=args.tag, run_root=run_root)
+
     dataset_kwargs = config_data.get("dataset_kwargs", {})
     config_kwargs = config_data.get("model_config", {}).copy()
-    config_kwargs["epochs"] = args.epochs if args.epochs is not None else config_kwargs.get("epochs", 2)
+    if args.epochs is not None:
+        config_kwargs["epochs"] = args.epochs
+    base_config = runner.coerce_model_config(model_name, config_kwargs or None)
 
-    if model_name == "graph-wavenet":
-        from spatiotemporal.adapters import GraphWaveNetConfig
-
-        base_config = GraphWaveNetConfig(**config_kwargs)
-    else:
-        from spatiotemporal.adapters import STGCNConfig
-
-        base_config = STGCNConfig(**config_kwargs)
-
-    checkpoint_name = "best.pt"
-    model_kwargs["config"] = replace(
+    model_config = replace(
         base_config,
-        checkpoint_path=str(run_paths.checkpoint_dir / checkpoint_name),
+        checkpoint_path=str(run_paths.checkpoint_dir / "best.pt"),
     )
 
     resolved_payload = {
         "model": model_name,
         "dataset": dataset_name,
         "dataset_kwargs": dataset_kwargs,
-        "model_config": asdict(model_kwargs["config"]),
+        "model_config": asdict(model_config),
         "run_dir": str(run_paths.run_dir),
     }
     run_manager.save_config(run_paths.config_path, resolved_payload)
 
     dataset = runner.create_dataset(dataset_name, **dataset_kwargs)
     data = dataset.load()
-    model = runner.create_model(model_name, **model_kwargs)
+    model = runner.create_model(model_name, config=model_config)
     bundle = model.prepare_training_bundle(data)
 
     export_dir = args.export_dir or str(run_paths.export_dir / "native")

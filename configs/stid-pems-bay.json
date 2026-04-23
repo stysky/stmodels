@@ -1,5 +1,5 @@
 ﻿{
-    "model":  "graph-wavenet",
+    "model":  "stid",
     "dataset":  "pems-bay",
     "extends":  "_base/common.json"
 }

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
+from typing import Sequence
 
 import h5py
 import numpy as np
@@ -22,6 +23,23 @@ class StandardScaler:
 
     def inverse_transform(self, data):
         return (data * self.std) + self.mean
+
+
+class FeatureScaler:
+    def __init__(self, channels: Sequence[int], mean: np.ndarray | float, std: np.ndarray | float, eps: float = 1e-6):
+        self.channels = tuple(int(channel) for channel in channels)
+        self.mean = mean
+        self.std = np.maximum(std, eps)
+
+    def transform(self, data):
+        transformed = data.clone() if hasattr(data, "clone") else np.array(data, copy=True)
+        transformed[..., self.channels] = (transformed[..., self.channels] - self.mean) / self.std
+        return transformed
+
+    def inverse_transform(self, data):
+        restored = data.clone() if hasattr(data, "clone") else np.array(data, copy=True)
+        restored[..., self.channels] = (restored[..., self.channels] * self.std) + self.mean
+        return restored
 
 
 def clean_speed_dataframe(
@@ -82,72 +100,99 @@ def split_indices(num_items: int, split_config: SplitConfig) -> tuple[slice, sli
     return train_slice, val_slice, test_slice
 
 
-def add_graph_wavenet_features(
-    df: pd.DataFrame,
-    add_time_in_day: bool = True,
-    add_day_in_week: bool = False,
-) -> np.ndarray:
-    num_samples, num_nodes = df.shape
-    data = np.expand_dims(df.values, axis=-1)
-    feature_list = [data]
-
-    if add_time_in_day:
-        time_ind = (df.index.values - df.index.values.astype("datetime64[D]")) / np.timedelta64(1, "D")
-        time_in_day = np.tile(time_ind, [1, num_nodes, 1]).transpose((2, 1, 0))
-        feature_list.append(time_in_day.astype(np.float32))
-
-    if add_day_in_week:
-        dow = df.index.dayofweek
-        dow_tiled = np.tile(dow, [1, num_nodes, 1]).transpose((2, 1, 0))
-        feature_list.append(dow_tiled.astype(np.float32))
-
-    return np.concatenate(feature_list, axis=-1).astype(np.float32)
+def ensure_feature_axis(values: np.ndarray) -> np.ndarray:
+    values = np.asarray(values, dtype=np.float32)
+    if values.ndim == 2:
+        return values[..., None]
+    if values.ndim != 3:
+        raise ValueError(f"Expected [T, N] or [T, N, F] data, got {values.shape}")
+    return values.astype(np.float32)
 
 
-def make_graph_wavenet_windows(
-    df: pd.DataFrame,
+def build_temporal_features(
+    timestamps: pd.DatetimeIndex,
+    num_nodes: int,
+    include_time_of_day: bool = True,
+    include_day_of_week: bool = True,
+) -> tuple[np.ndarray, list[str]]:
+    features: list[np.ndarray] = []
+    feature_names: list[str] = []
+
+    if include_time_of_day:
+        seconds_in_day = 24 * 60 * 60
+        time_fraction = (
+            timestamps.hour * 3600
+            + timestamps.minute * 60
+            + timestamps.second
+        ) / seconds_in_day
+        sin_component = np.sin(2 * np.pi * time_fraction.to_numpy(dtype=np.float32))
+        cos_component = np.cos(2 * np.pi * time_fraction.to_numpy(dtype=np.float32))
+        tiled_sin = np.repeat(sin_component[:, None], num_nodes, axis=1)[..., None]
+        tiled_cos = np.repeat(cos_component[:, None], num_nodes, axis=1)[..., None]
+        features.extend([tiled_sin, tiled_cos])
+        feature_names.extend(["time_of_day_sin", "time_of_day_cos"])
+
+    if include_day_of_week:
+        day_fraction = timestamps.dayofweek.to_numpy(dtype=np.float32) / 7.0
+        sin_component = np.sin(2 * np.pi * day_fraction)
+        cos_component = np.cos(2 * np.pi * day_fraction)
+        tiled_sin = np.repeat(sin_component[:, None], num_nodes, axis=1)[..., None]
+        tiled_cos = np.repeat(cos_component[:, None], num_nodes, axis=1)[..., None]
+        features.extend([tiled_sin, tiled_cos])
+        feature_names.extend(["day_of_week_sin", "day_of_week_cos"])
+
+    if not features:
+        return np.zeros((len(timestamps), num_nodes, 0), dtype=np.float32), []
+    return np.concatenate(features, axis=-1).astype(np.float32), feature_names
+
+
+def build_feature_tensor(
+    values: np.ndarray,
+    timestamps: pd.DatetimeIndex,
+    include_time_of_day: bool = True,
+    include_day_of_week: bool = True,
+    base_feature_names: list[str] | None = None,
+) -> tuple[np.ndarray, list[str]]:
+    base_values = ensure_feature_axis(values)
+    feature_names = list(base_feature_names or [f"feature_{i}" for i in range(base_values.shape[-1])])
+    temporal_features, temporal_feature_names = build_temporal_features(
+        timestamps,
+        num_nodes=base_values.shape[1],
+        include_time_of_day=include_time_of_day,
+        include_day_of_week=include_day_of_week,
+    )
+    if temporal_features.shape[-1] == 0:
+        return base_values, feature_names
+    return np.concatenate([base_values, temporal_features], axis=-1).astype(np.float32), feature_names + temporal_feature_names
+
+
+def make_forecasting_windows(
+    data: np.ndarray,
     history_steps: int,
     horizon_steps: int,
+    target_indices: Sequence[int] = (0,),
     y_start: int = 1,
-    add_time_in_day: bool = True,
-    add_day_in_week: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    data = add_graph_wavenet_features(
-        df,
-        add_time_in_day=add_time_in_day,
-        add_day_in_week=add_day_in_week,
-    )
+    values = ensure_feature_axis(data)
     x_offsets = np.sort(np.arange(-(history_steps - 1), 1, 1))
-    y_offsets = np.sort(np.arange(y_start, horizon_steps + 1, 1))
+    y_offsets = np.sort(np.arange(y_start, y_start + horizon_steps, 1))
 
-    min_t = abs(min(x_offsets))
-    max_t = abs(data.shape[0] - abs(max(y_offsets)))
+    min_t = abs(int(x_offsets.min()))
+    max_t = values.shape[0] - int(y_offsets.max())
+    if max_t <= min_t:
+        raise ValueError("Not enough samples to create forecasting windows")
+
     x, y = [], []
     for t in range(min_t, max_t):
-        x.append(data[t + x_offsets, ...])
-        y.append(data[t + y_offsets, ...])
+        x.append(values[t + x_offsets, ...])
+        y.append(values[t + y_offsets, ...][..., list(target_indices)])
+
     return (
         np.stack(x, axis=0).astype(np.float32),
         np.stack(y, axis=0).astype(np.float32),
         x_offsets.astype(np.int64),
         y_offsets.astype(np.int64),
     )
-
-
-def make_stgcn_windows(data: np.ndarray, history_steps: int, prediction_step: int) -> tuple[np.ndarray, np.ndarray]:
-    n_vertex = data.shape[1]
-    total = len(data) - history_steps - prediction_step
-    if total <= 0:
-        raise ValueError("Not enough samples to create STGCN windows")
-
-    x = np.zeros((total, 1, history_steps, n_vertex), dtype=np.float32)
-    y = np.zeros((total, n_vertex), dtype=np.float32)
-    for i in range(total):
-        head = i
-        tail = i + history_steps
-        x[i, :, :, :] = data[head:tail].reshape(1, history_steps, n_vertex)
-        y[i] = data[tail + prediction_step - 1]
-    return x, y
 
 
 def load_pickle_adj(pickle_file: str | Path) -> tuple[list[str], dict[str, int], np.ndarray]:

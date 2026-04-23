@@ -22,18 +22,30 @@ def coerce_history_frame(
     freq: str,
     fallback_timestamps: pd.DatetimeIndex | None = None,
 ) -> pd.DataFrame:
+    def build_default_index(length: int) -> pd.DatetimeIndex:
+        if fallback_timestamps is not None and len(fallback_timestamps) >= length:
+            return fallback_timestamps[-length:]
+        return pd.date_range(start="2000-01-01", periods=length, freq=freq)
+
     if isinstance(history, pd.DataFrame):
-        return history.copy()
+        frame = history.copy()
+        if set(sensor_ids).issubset(frame.columns):
+            frame = frame.loc[:, sensor_ids]
+        elif list(frame.columns) != list(sensor_ids):
+            raise ValueError("History DataFrame columns must exactly match sensor_ids")
+
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            frame.index = build_default_index(len(frame))
+        return frame
 
     values = np.asarray(history, dtype=np.float32)
+    if values.ndim == 3 and values.shape[-1] == 1:
+        values = values[..., 0]
     if values.ndim != 2 or values.shape[1] != len(sensor_ids):
         raise ValueError("History must have shape [T, N]")
 
     frame = pd.DataFrame(values, columns=sensor_ids)
-    if fallback_timestamps is not None and len(fallback_timestamps) >= len(frame):
-        frame.index = fallback_timestamps[-len(frame):]
-    else:
-        frame.index = pd.date_range(start="2000-01-01", periods=len(frame), freq=freq)
+    frame.index = build_default_index(len(frame))
     return frame
 
 

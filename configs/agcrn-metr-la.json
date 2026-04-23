@@ -1,5 +1,5 @@
 ﻿{
-    "model":  "stgcn",
+    "model":  "agcrn",
     "dataset":  "metr-la",
     "extends":  "_base/common.json"
 }

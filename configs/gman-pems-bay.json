@@ -1,5 +1,5 @@
 ﻿{
-    "model":  "graph-wavenet",
+    "model":  "gman",
     "dataset":  "pems-bay",
     "extends":  "_base/common.json"
 }
